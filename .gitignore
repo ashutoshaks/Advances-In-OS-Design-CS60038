@@ -1,0 +1,6 @@
+*.zip
+.vscode/
+a.out
+*.o
+*.ko
+*.mod
