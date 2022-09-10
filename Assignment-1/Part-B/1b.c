@@ -129,6 +129,7 @@ static int *extract_min(struct priority_queue *pq) {
 /*
 what to do with error codes?
 how is the proc file read/write with priority values working?
+(need to add one more state to indicate value/priority is being written)
 can values be negative
 limit on max processes?
 */
