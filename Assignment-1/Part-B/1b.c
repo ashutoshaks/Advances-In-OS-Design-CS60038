@@ -36,6 +36,7 @@ struct priority_queue {
     struct element *heap;
     int size;
     int capacity;
+    int last_value;
     int timer;
 };
 
@@ -52,10 +53,8 @@ int compare(struct element *a, struct element *b) {
 
 enum proc_state {
     PROC_FILE_OPEN,
-    PROC_HEAP_INIT,
     PROC_READ_VALUE,
     PROC_READ_PRIORITY,
-    PROC_FILE_CLOSE
 };
 
 // Linked list of processes
@@ -69,8 +68,8 @@ struct process_node {
 // Global variables
 static struct proc_dir_entry *proc_file;
 static char procfs_buffer[PROCFS_MAX_SIZE];
-static unsigned long procfs_buffer_size = 0;
-static process_node *process_list = NULL;
+static size_t procfs_buffer_size = 0;
+static struct process_node *process_list = NULL;
 
 DEFINE_MUTEX(mutex);
 
@@ -79,25 +78,26 @@ DEFINE_MUTEX(mutex);
 static struct priority_queue *create_pq(int capacity) {
     struct priority_queue *pq = kmalloc(sizeof(struct priority_queue), GFP_KERNEL);
     if (pq == NULL) {
-        printk(KERN_ALERT "Error: could not allocate memory for priority queue");
+        printk(KERN_ALERT "Error: could not allocate memory for priority queue\n");
         return NULL;
     }
     pq->heap = kmalloc(capacity * sizeof(struct element), GFP_KERNEL);
     if (pq->heap == NULL) {
-        printk(KERN_ALERT "Error: could not allocate memory for priority queue heap array");
+        printk(KERN_ALERT "Error: could not allocate memory for priority queue heap array\n");
         return NULL;
     }
     pq->size = 0;
     pq->capacity = capacity;
+    pq->last_value = 0;
     pq->timer = 0;
     return pq;
 }
 
 // implement a min heap based on first priority, then insert_time
 
-static int insert(struct priority_queue *pq, int val, int priority) {
+static int insert_pq(struct priority_queue *pq, int val, int priority) {
     if (pq->size == pq->capacity) {
-        printk(KERN_ALERT "Error: priority queue is full");
+        printk(KERN_ALERT "Error: priority queue is full\n");
         return -EACCES;
     }
     pq->heap[pq->size].val = val;
@@ -116,9 +116,9 @@ static int insert(struct priority_queue *pq, int val, int priority) {
     return 0;
 }
 
-static int *extract_min(struct priority_queue *pq) {
+static int extract_min(struct priority_queue *pq) {
     if (pq->size == 0) {
-        printk(KERN_ALERT "Error: priority queue is empty");
+        printk(KERN_ALERT "Error: priority queue is empty\n");
         return -EACCES;
     }
     int min_val = pq->heap[0].val;
@@ -148,11 +148,12 @@ static int *extract_min(struct priority_queue *pq) {
 }
 
 static int delete_pq(struct priority_queue *pq) {
-    kfree(pq->heap);
-    kfree(pq);
+    if (pq != NULL) {
+        kfree(pq->heap);
+        kfree(pq);
+    }
     return 0;
 }
-
 
 // Fnd the process node with the given pid
 static struct process_node *find_process(pid_t pid) {
@@ -180,7 +181,7 @@ static struct process_node *insert_process(pid_t pid) {
     return node;
 }
 
-static int delete_process_node(process_node *node) {
+static int delete_process_node(struct process_node *node) {
     delete_pq(node->proc_pq);
     kfree(node);
     return 0;
@@ -196,8 +197,6 @@ static int delete_process(pid_t pid) {
             } else {
                 prev->next = curr->next;
             }
-            // delete_pq(curr->proc_pq);
-            // kfree(curr);
             delete_process_node(curr);
             return 0;
         }
@@ -207,10 +206,10 @@ static int delete_process(pid_t pid) {
     return -EACCES;
 }
 
-static int delete_process_list() {
-    process_node *curr = process_list;
+static int delete_process_list(void) {
+    struct process_node *curr = process_list;
     while (curr != NULL) {
-        process_node *temp = curr;
+        struct process_node *temp = curr;
         curr = curr->next;
         delete_process_node(temp);
     }
@@ -223,20 +222,20 @@ static int procfile_open(struct inode *inode, struct file *file) {
     mutex_lock(&mutex);
 
     pid_t pid = current->pid;
-    printk(KERN_INFO "procfile_open() invoked by process", pid);
+    printk(KERN_INFO "procfile_open() invoked by process %d\n", pid);
     int ret = 0;
 
     struct process_node *curr = find_process(pid);
     if (curr == NULL) {
         curr = insert_process(pid);
         if (curr == NULL) {
-            printk(KERN_ALERT "Error: could not allocate memory for process node");
+            printk(KERN_ALERT "Error: could not allocate memory for process node\n");
             ret = -ENOMEM;
         } else {
-            printk(KERN_INFO "Process %d has been added to the process list", pid);
+            printk(KERN_INFO "Process %d has been added to the process list\n", pid);
         }
     } else {
-        printk(KERN_ALERT "Error: process %d has the proc file already open", pid);
+        printk(KERN_ALERT "Error: process %d has the proc file already open\n", pid);
         ret = -EACCES;
     }
 
@@ -248,44 +247,157 @@ static int procfile_close(struct inode *inode, struct file *file) {
     mutex_lock(&mutex);
 
     pid_t pid = current->pid;
-    printk(KERN_INFO "procfile_close() invoked by process", pid);
+    printk(KERN_INFO "procfile_close() invoked by process %d\n", pid);
     int ret = 0;
 
     struct process_node *curr = find_process(pid);
     if (curr == NULL) {
-        printk(KERN_ALERT "Error: process %d does not have the proc file open", pid);
+        printk(KERN_ALERT "Error: process %d does not have the proc file open\n", pid);
         ret = -EACCES;
+    } else {
+        delete_process(pid);
+        printk(KERN_INFO "Process %d has been removed from the process list\n", pid);
     }
-
-    delete_process(curr);
-    printk(KERN_INFO "Process %d has been removed from the process list", pid);
 
     mutex_unlock(&mutex);
     return ret;
 }
 
+static ssize_t handle_read(struct process_node *curr) {
+}
+
 static ssize_t procfile_read(struct file *filep, char __user *buffer, size_t length, loff_t *offset) {
+    mutex_lock(&mutex);
+
+    pid_t pid = current->pid;
+    printk(KERN_INFO "procfile_read() invoked by process %d\n", pid);
+    int ret = 0;
+
+    struct process_node *curr = find_process(pid);
+    if (curr == NULL) {
+        printk(KERN_ALERT "Error: process %d does not have the proc file open\n", pid);
+        ret = -EACCES;
+    } else {
+        if (length == 0) {
+            printk(KERN_ALERT "Error: empty write\n");
+            ret = -EINVAL;
+        } else {
+            procfs_buffer_size = min(length, (size_t)PROCFS_MAX_SIZE);
+            ret = handle_read(curr);
+            // TODO: continue from here
+
+
+            if (copy_from_user(procfs_buffer, buffer, procfs_buffer_size)) {
+                printk(KERN_ALERT "Error: could not copy from user\n");
+                ret = -EFAULT;
+            } else {
+            }
+        }
+    }
+    mutex_unlock(&mutex);
+    return ret;
+}
+
+static ssize_t handle_write(struct process_node *curr) {
+    if (curr->state == PROC_FILE_OPEN) {
+        if (procfs_buffer_size > 1ul) {
+            printk(KERN_ALERT "Error: Buffer size for capacity must be 1 byte\n");
+            return -EINVAL;
+        }
+        size_t capacity = (size_t)procfs_buffer[0];
+        if (capacity < 1 || capacity > 100) {
+            printk(KERN_ALERT "Error: Capacity must be between 1 and 100\n");
+            return -EINVAL;
+        }
+        curr->proc_pq = create_pq(capacity);
+        if (curr->proc_pq == NULL) {
+            printk(KERN_ALERT "Error: priority queue initialization failed\n");
+            return -ENOMEM;
+        }
+        printk(KERN_INFO "Priority queue with capacity %zu has been intialized for process %d\n", capacity, curr->pid);
+        curr->state = PROC_READ_VALUE;
+    } else if (curr->state == PROC_READ_VALUE) {
+        if (procfs_buffer_size > 4ul) {  // sizeof(int)
+            printk(KERN_ALERT "Error: Buffer size for value must be 4 bytes\n");
+            return -EINVAL;
+        }
+        if (curr->proc_pq->size == curr->proc_pq->capacity) {
+            printk(KERN_ALERT "Error: priority queue is full\n");
+            return -EACCES;
+        }
+        int value = *((int *)procfs_buffer);
+        curr->proc_pq->last_value = value;
+        printk(KERN_INFO "Value %d has been written to the proc file for process %d\n", value, curr->pid);
+        curr->state = PROC_READ_PRIORITY;
+    } else if (curr->state == PROC_READ_PRIORITY) {
+        if (procfs_buffer_size > 4ul) {  // sizeof(int)
+            printk(KERN_ALERT "Error: Buffer size for priority must be 4 bytes\n");
+            return -EINVAL;
+        }
+        if (curr->proc_pq->size == curr->proc_pq->capacity) {
+            printk(KERN_ALERT "Error: priority queue is full\n");
+            return -EACCES;
+        }
+        int priority = *((int *)procfs_buffer);
+        if (priority < 1) {
+            printk(KERN_ALERT "Error: Priority must be a positive integer\n");
+            return -EINVAL;
+        }
+        printk(KERN_INFO "Priority %d has been written to the proc file for process %d\n", priority, curr->pid);
+        int ret = insert_pq(curr->proc_pq, curr->proc_pq->last_value, priority);
+        if (ret < 0) {
+            printk(KERN_ALERT "Error: priority queue insertion failed\n");
+            return -EACCES;
+        }
+        printk(KERN_INFO "(%d, %d) value-priority element has been inserted into the priority queue for process %d\n", curr->proc_pq->last_value, priority, curr->pid);
+        curr->state = PROC_READ_VALUE;
+    }
+    return procfs_buffer_size;
 }
 
 static ssize_t procfile_write(struct file *filep, const char __user *buffer, size_t length, loff_t *offset) {
+    mutex_lock(&mutex);
+
+    pid_t pid = current->pid;
+    printk(KERN_INFO "procfile_write() invoked by process %d\n", pid);
+    int ret = 0;
+
+    struct process_node *curr = find_process(pid);
+    if (curr == NULL) {
+        printk(KERN_ALERT "Error: process %d does not have the proc file open\n", pid);
+        ret = -EACCES;
+    } else {
+        if (length == 0) {
+            printk(KERN_ALERT "Error: empty write\n");
+            ret = -EINVAL;
+        } else {
+            procfs_buffer_size = min(length, (size_t)PROCFS_MAX_SIZE);
+            if (copy_from_user(procfs_buffer, buffer, procfs_buffer_size)) {
+                printk(KERN_ALERT "Error: could not copy from user\n");
+                ret = -EFAULT;
+            } else {
+                ret = handle_write(curr);
+            }
+        }
+    }
+    mutex_unlock(&mutex);
+    return ret;
 }
 
-static const struct file_operations proc_fops = {
-    .owner = THIS_MODULE,
-    .open = procfile_open,
-    .read = procfile_read,
-    .write = procfile_write,
-    .release = procfile_close,
+static const struct proc_ops proc_fops = {
+    .proc_open = procfile_open,
+    .proc_read = procfile_read,
+    .proc_write = procfile_write,
+    .proc_release = procfile_close,
 };
-
 
 static int __init lkm_init(void) {
     printk(KERN_INFO "LKM for partb_1_3 loaded\n");
 
     proc_file = proc_create(PROCFS_NAME, 0666, NULL, &proc_fops);
     if (proc_file == NULL) {
-        printk(KERN_ALERT "Error: could not create proc file");
-        return -ENOMEM;
+        printk(KERN_ALERT "Error: could not create proc file\n");
+        return -ENOENT;
     }
     printk(KERN_INFO "/proc/%s created\n", PROCFS_NAME);
     // Buffer for proc file is statically allocated
