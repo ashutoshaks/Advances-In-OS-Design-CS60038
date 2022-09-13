@@ -147,12 +147,11 @@ static int extract_min(struct priority_queue *pq) {
     return min_val;
 }
 
-static int delete_pq(struct priority_queue *pq) {
+static void delete_pq(struct priority_queue *pq) {
     if (pq != NULL) {
         kfree(pq->heap);
         kfree(pq);
     }
-    return 0;
 }
 
 // Fnd the process node with the given pid
@@ -181,10 +180,11 @@ static struct process_node *insert_process(pid_t pid) {
     return node;
 }
 
-static int delete_process_node(struct process_node *node) {
-    delete_pq(node->proc_pq);
-    kfree(node);
-    return 0;
+static void delete_process_node(struct process_node *node) {
+    if (node != NULL) {
+        delete_pq(node->proc_pq);
+        kfree(node);
+    }
 }
 
 static int delete_process(pid_t pid) {
@@ -206,14 +206,13 @@ static int delete_process(pid_t pid) {
     return -EACCES;
 }
 
-static int delete_process_list(void) {
+static void delete_process_list(void) {
     struct process_node *curr = process_list;
     while (curr != NULL) {
         struct process_node *temp = curr;
         curr = curr->next;
         delete_process_node(temp);
     }
-    return 0;
 }
 
 // Open, close, read and write handlers for proc file
@@ -264,6 +263,20 @@ static int procfile_close(struct inode *inode, struct file *file) {
 }
 
 static ssize_t handle_read(struct process_node *curr) {
+    if (curr->state == PROC_FILE_OPEN) {
+        printk(KERN_ALERT "Error: process %d has not yet written anything to the proc file\n", curr->pid);
+        return -EACCES;
+    }
+    // curr->proc_pq cannot be NULL if the control comes here
+    if (curr->proc_pq->size == 0) {
+        printk(KERN_ALERT "Error: priority queue is empty\n");
+        return -EACCES;
+    }
+    int min_val = extract_min(curr->proc_pq);
+    strncpy(procfs_buffer, (const char *)&min_val, sizeof(int));
+    procfs_buffer[sizeof(int)] = '\0';
+    procfs_buffer_size = sizeof(int);
+    return procfs_buffer_size;
 }
 
 static ssize_t procfile_read(struct file *filep, char __user *buffer, size_t length, loff_t *offset) {
@@ -278,19 +291,14 @@ static ssize_t procfile_read(struct file *filep, char __user *buffer, size_t len
         printk(KERN_ALERT "Error: process %d does not have the proc file open\n", pid);
         ret = -EACCES;
     } else {
-        if (length == 0) {
-            printk(KERN_ALERT "Error: empty write\n");
-            ret = -EINVAL;
-        } else {
-            procfs_buffer_size = min(length, (size_t)PROCFS_MAX_SIZE);
-            ret = handle_read(curr);
-            // TODO: continue from here
-
-
-            if (copy_from_user(procfs_buffer, buffer, procfs_buffer_size)) {
-                printk(KERN_ALERT "Error: could not copy from user\n");
-                ret = -EFAULT;
+        procfs_buffer_size = min(length, (size_t)PROCFS_MAX_SIZE);
+        ret = handle_read(curr);
+        if (ret >= 0) {
+            if (copy_to_user(buffer, procfs_buffer, procfs_buffer_size) != 0) {
+                printk(KERN_ALERT "Error: could not copy data to user space\n");
+                ret = -EACCES;
             } else {
+                ret = procfs_buffer_size;
             }
         }
     }
@@ -367,7 +375,7 @@ static ssize_t procfile_write(struct file *filep, const char __user *buffer, siz
         printk(KERN_ALERT "Error: process %d does not have the proc file open\n", pid);
         ret = -EACCES;
     } else {
-        if (length == 0) {
+        if (buffer == NULL || length == 0) {
             printk(KERN_ALERT "Error: empty write\n");
             ret = -EINVAL;
         } else {
