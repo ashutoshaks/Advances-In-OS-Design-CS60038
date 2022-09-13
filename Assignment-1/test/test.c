@@ -35,7 +35,7 @@ int main() {
     for (int i = 0; i < 5; i++) {
         int read_value;
         read(fd, &read_value, sizeof(int));
-        printf("read value: %d\n", read_value);
+        printf("read value: %d", read_value);
     }
 
     close(fd);

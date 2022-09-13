@@ -14,6 +14,8 @@ MODULE_AUTHOR("Vanshita Garg and Ashutosh Kumar Singh");
 MODULE_DESCRIPTION("LKM for a priority queue");
 MODULE_VERSION("0.1");
 
+#define DEBUG
+
 #define PROCFS_NAME "partb_1_3"
 #define PROCFS_MAX_SIZE 1024
 
@@ -135,7 +137,9 @@ static int extract_min(struct priority_queue *pq) {
         if (right < pq->size && compare(&pq->heap[right], &pq->heap[left])) {
             min_child = right;
         }
-        if (compare(&pq->heap[i], &pq->heap[min_child])) {
+        // printk(KERN_INFO "i: %d, left: %d, right: %d, min_child: %d\n", i, left, right, min_child);
+        if (!compare(&pq->heap[i], &pq->heap[min_child])) {
+            // printk(KERN_INFO "swapping\n");
             struct element temp = pq->heap[i];
             pq->heap[i] = pq->heap[min_child];
             pq->heap[min_child] = temp;
@@ -145,6 +149,19 @@ static int extract_min(struct priority_queue *pq) {
         }
     }
     return min_val;
+}
+
+// print priority queue
+static void print_pq(struct priority_queue *pq) {
+#ifdef DEBUG
+    printk(KERN_INFO "Priority queue for process %d\n", current->pid);
+    if (pq != NULL && pq->heap != NULL) {
+        int i;
+        for (i = 0; i < pq->size; i++) {
+            printk(KERN_INFO "%d  [%d, %d, %d]\n", i, pq->heap[i].val, pq->heap[i].priority, pq->heap[i].insert_time);
+        }
+    }
+#endif
 }
 
 static void delete_pq(struct priority_queue *pq) {
@@ -301,6 +318,7 @@ static ssize_t procfile_read(struct file *filep, char __user *buffer, size_t len
                 ret = procfs_buffer_size;
             }
         }
+        print_pq(curr->proc_pq);
     }
     mutex_unlock(&mutex);
     return ret;
@@ -379,6 +397,7 @@ static ssize_t procfile_write(struct file *filep, const char __user *buffer, siz
             printk(KERN_ALERT "Error: empty write\n");
             ret = -EINVAL;
         } else {
+            // printk(KERN_INFO "length = %ld", length);
             procfs_buffer_size = min(length, (size_t)PROCFS_MAX_SIZE);
             if (copy_from_user(procfs_buffer, buffer, procfs_buffer_size)) {
                 printk(KERN_ALERT "Error: could not copy from user\n");
@@ -387,6 +406,7 @@ static ssize_t procfile_write(struct file *filep, const char __user *buffer, siz
                 ret = handle_write(curr);
             }
         }
+        print_pq(curr->proc_pq);
     }
     mutex_unlock(&mutex);
     return ret;
