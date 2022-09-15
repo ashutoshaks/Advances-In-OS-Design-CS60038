@@ -14,19 +14,10 @@ MODULE_AUTHOR("Vanshita Garg and Ashutosh Kumar Singh");
 MODULE_DESCRIPTION("LKM for a priority queue");
 MODULE_VERSION("0.1");
 
-#define DEBUG
+// #define DEBUG
 
 #define PROCFS_NAME "partb_1_3"
 #define PROCFS_MAX_SIZE 1024
-
-/*
-1 proc file (max buff size = 1024)
-multiple processes possible (max is fixed = 128, no need to fix max if we use a dynamic linked list)
-2 mutex locks for processes and proc file - read_write and open_close
-*/
-
-// Throughout the code, return negative of error codes to denote error conditions
-// Also keep printing log and debug messages
 
 struct element {
     int val;
@@ -42,7 +33,6 @@ struct priority_queue {
     int timer;
 };
 
-// Comparison first based on priority, then on insert_time
 int compare(struct element *a, struct element *b) {
     if (a->priority < b->priority) {
         return 1;
@@ -95,8 +85,6 @@ static struct priority_queue *create_pq(int capacity) {
     return pq;
 }
 
-// implement a min heap based on first priority, then insert_time
-
 static int insert_pq(struct priority_queue *pq, int val, int priority) {
     if (pq->size == pq->capacity) {
         printk(KERN_ALERT "Error: priority queue is full\n");
@@ -137,9 +125,7 @@ static int extract_min(struct priority_queue *pq) {
         if (right < pq->size && compare(&pq->heap[right], &pq->heap[left])) {
             min_child = right;
         }
-        // printk(KERN_INFO "i: %d, left: %d, right: %d, min_child: %d\n", i, left, right, min_child);
         if (!compare(&pq->heap[i], &pq->heap[min_child])) {
-            // printk(KERN_INFO "swapping\n");
             struct element temp = pq->heap[i];
             pq->heap[i] = pq->heap[min_child];
             pq->heap[min_child] = temp;
@@ -154,7 +140,7 @@ static int extract_min(struct priority_queue *pq) {
 // print priority queue
 static void print_pq(struct priority_queue *pq) {
 #ifdef DEBUG
-    printk(KERN_INFO "Priority queue for process %d\n", current->pid);
+    printk(KERN_INFO "Priority queue for process %d:\n", current->pid);
     if (pq != NULL && pq->heap != NULL) {
         int i;
         for (i = 0; i < pq->size; i++) {
@@ -397,7 +383,6 @@ static ssize_t procfile_write(struct file *filep, const char __user *buffer, siz
             printk(KERN_ALERT "Error: empty write\n");
             ret = -EINVAL;
         } else {
-            // printk(KERN_INFO "length = %ld", length);
             procfs_buffer_size = min(length, (size_t)PROCFS_MAX_SIZE);
             if (copy_from_user(procfs_buffer, buffer, procfs_buffer_size)) {
                 printk(KERN_ALERT "Error: could not copy from user\n");
@@ -441,11 +426,3 @@ static void __exit lkm_exit(void) {
 
 module_init(lkm_init);
 module_exit(lkm_exit);
-
-/*
-what to do with error codes?
-how is the proc file read/write with priority values working?
-(need to add one more state to indicate value/priority is being written)
-can values be negative
-limit on max processes?
-*/

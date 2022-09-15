@@ -5,39 +5,48 @@
 #include <unistd.h>
 #include <wait.h>
 
-int main() {
+void execute(int val[], int n, int prio[]) {
     int fd = open("/proc/partb_1_3", O_RDWR);
-    char capacity = (char)10;
-    write(fd, &capacity, sizeof(char));
-    // write value then priority one by one
-    int value = 1;
-    int priority = 5;
-    write(fd, &value, sizeof(int));
-    write(fd, &priority, sizeof(int));
-    value = -2;
-    priority = 2;
-    write(fd, &value, sizeof(int));
-    write(fd, &priority, sizeof(int));
-    value = 3;
-    priority = 9;
-    write(fd, &value, sizeof(int));
-    write(fd, &priority, sizeof(int));
-    value = 4;
-    priority = 1;
-    write(fd, &value, sizeof(int));
-    write(fd, &priority, sizeof(int));
-    value = -5;
-    priority = 2;
-    write(fd, &value, sizeof(int));
-    write(fd, &priority, sizeof(int));
+    char c = (char)n;
+    write(fd, &c, 1);
+    for (int i = 0; i < n; i++) {
+        int ret = write(fd, &val[i], sizeof(int));
+        printf("[Proc %d] Write: %d, Return: %d\n", getpid(), val[i], ret);
+        usleep(100);
 
-    // make read calls
-    for (int i = 0; i < 5; i++) {
-        int read_value;
-        read(fd, &read_value, sizeof(int));
-        printf("read value: %d\n", read_value);
+        ret = write(fd, &prio[i], sizeof(int));
+        printf("[Proc %d] Write: %d, Return: %d\n", getpid(), prio[i], ret);
+        usleep(100);
     }
-
+    for (int i = 0; i < n + 1; i++) {
+        int out;
+        int ret = read(fd, &out, sizeof(int));
+        printf("[Proc %d] Read: %d, Return: %d\n", getpid(), out, ret);
+        usleep(100);
+    }
     close(fd);
+}
+
+int main() {
+    // int val_p[] = {0, 1, -2, 3, 4};
+    // int prio_p[] = {5, 2, 9, 2, 3};
+
+    // int val_c[] = {6, -7, 8, -9, 10};
+    // int prio_c[] = {56, 38, 98, 27, 98};
+
+    int val_p[] = {0, 1, -2, 3};
+    int prio_p[] = {5, 2, 9, 2};
+
+    int val_c[] = {6, -7, 8, -9};
+    int prio_c[] = {56, 38, 98, 27};
+
+    int pid = fork();
+    if (pid == 0) {
+        execute(val_c, 4, prio_c);
+    } else {
+        execute(val_p, 4, prio_p);
+        wait(NULL);
+    }
+    
     return 0;
 }
