@@ -33,6 +33,7 @@ struct priority_queue {
     int timer;
 };
 
+// Comparison first based on priority and then on insert time
 int compare(struct element *a, struct element *b) {
     if (a->priority < b->priority) {
         return 1;
@@ -67,6 +68,7 @@ DEFINE_MUTEX(mutex);
 
 // Priority queue functions
 
+// Initialize the priority queue
 static struct priority_queue *create_pq(int capacity) {
     struct priority_queue *pq = kmalloc(sizeof(struct priority_queue), GFP_KERNEL);
     if (pq == NULL) {
@@ -85,6 +87,7 @@ static struct priority_queue *create_pq(int capacity) {
     return pq;
 }
 
+// Insert an element into the priority queue
 static int insert_pq(struct priority_queue *pq, int val, int priority) {
     if (pq->size == pq->capacity) {
         printk(KERN_ALERT "Error: priority queue is full\n");
@@ -106,6 +109,7 @@ static int insert_pq(struct priority_queue *pq, int val, int priority) {
     return 0;
 }
 
+// Extract the minimum element from the priority queue
 static int extract_min(struct priority_queue *pq) {
     if (pq->size == 0) {
         printk(KERN_ALERT "Error: priority queue is empty\n");
@@ -137,7 +141,7 @@ static int extract_min(struct priority_queue *pq) {
     return min_val;
 }
 
-// print priority queue
+// Print priority queue
 static void print_pq(struct priority_queue *pq) {
 #ifdef DEBUG
     printk(KERN_INFO "Priority queue for process %d:\n", current->pid);
@@ -150,6 +154,7 @@ static void print_pq(struct priority_queue *pq) {
 #endif
 }
 
+// Free the memory allocated to the priority queue
 static void delete_pq(struct priority_queue *pq) {
     if (pq != NULL) {
         kfree(pq->heap);
@@ -157,7 +162,7 @@ static void delete_pq(struct priority_queue *pq) {
     }
 }
 
-// Fnd the process node with the given pid
+// Find the process node with the given pid
 static struct process_node *find_process(pid_t pid) {
     struct process_node *curr = process_list;
     while (curr != NULL) {
@@ -183,6 +188,7 @@ static struct process_node *insert_process(pid_t pid) {
     return node;
 }
 
+// Free the memory allocated to a process node
 static void delete_process_node(struct process_node *node) {
     if (node != NULL) {
         delete_pq(node->proc_pq);
@@ -190,6 +196,7 @@ static void delete_process_node(struct process_node *node) {
     }
 }
 
+// Delete a process node with the given pid
 static int delete_process(pid_t pid) {
     struct process_node *prev = NULL;
     struct process_node *curr = process_list;
@@ -209,6 +216,7 @@ static int delete_process(pid_t pid) {
     return -EACCES;
 }
 
+// Free the memory allocated to all process nodes
 static void delete_process_list(void) {
     struct process_node *curr = process_list;
     while (curr != NULL) {
@@ -220,6 +228,7 @@ static void delete_process_list(void) {
 
 // Open, close, read and write handlers for proc file
 
+// Open handler for proc file
 static int procfile_open(struct inode *inode, struct file *file) {
     mutex_lock(&mutex);
 
@@ -245,6 +254,7 @@ static int procfile_open(struct inode *inode, struct file *file) {
     return ret;
 }
 
+// Close handler for proc file
 static int procfile_close(struct inode *inode, struct file *file) {
     mutex_lock(&mutex);
 
@@ -265,6 +275,7 @@ static int procfile_close(struct inode *inode, struct file *file) {
     return ret;
 }
 
+// Helper function to handle reads
 static ssize_t handle_read(struct process_node *curr) {
     if (curr->state == PROC_FILE_OPEN) {
         printk(KERN_ALERT "Error: process %d has not yet written anything to the proc file\n", curr->pid);
@@ -282,6 +293,7 @@ static ssize_t handle_read(struct process_node *curr) {
     return procfs_buffer_size;
 }
 
+// Read handler for proc file
 static ssize_t procfile_read(struct file *filep, char __user *buffer, size_t length, loff_t *offset) {
     mutex_lock(&mutex);
 
@@ -310,6 +322,7 @@ static ssize_t procfile_read(struct file *filep, char __user *buffer, size_t len
     return ret;
 }
 
+// Helper function to handle writes
 static ssize_t handle_write(struct process_node *curr) {
     if (curr->state == PROC_FILE_OPEN) {
         if (procfs_buffer_size > 1ul) {
@@ -367,6 +380,7 @@ static ssize_t handle_write(struct process_node *curr) {
     return procfs_buffer_size;
 }
 
+// Write handler for proc file
 static ssize_t procfile_write(struct file *filep, const char __user *buffer, size_t length, loff_t *offset) {
     mutex_lock(&mutex);
 
@@ -404,6 +418,7 @@ static const struct proc_ops proc_fops = {
     .proc_release = procfile_close,
 };
 
+// Module initialization
 static int __init lkm_init(void) {
     printk(KERN_INFO "LKM for partb_1_3 loaded\n");
 
@@ -413,10 +428,10 @@ static int __init lkm_init(void) {
         return -ENOENT;
     }
     printk(KERN_INFO "/proc/%s created\n", PROCFS_NAME);
-    // Buffer for proc file is statically allocated
     return 0;
 }
 
+// Module cleanup
 static void __exit lkm_exit(void) {
     delete_process_list();
     remove_proc_entry(PROCFS_NAME, NULL);
