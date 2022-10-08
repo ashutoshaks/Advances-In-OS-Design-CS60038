@@ -28,19 +28,25 @@ void execute(int val[], int n, int prio[]) {
 }
 
 int main() {
-    int val_p[] = {0, 1, -2, 3, 4};
-    int prio_p[] = {5, 2, 9, 2, 3};
+    // int val_p[] = {0, 1, -2, 3, 4};
+    // int prio_p[] = {5, 2, 9, 2, 3};
 
     // int val_c[] = {6, -7, 8, -9, 10};
     // int prio_c[] = {56, 38, 98, 27, 98};
 
-    // int val_p[] = {0, 1, -2, 3};
-    // int prio_p[] = {5, 2, 9, 2};
+    int val_p[] = {0, 1, -2, 3};
+    int prio_p[] = {5, 2, 9, 2};
 
-    // int val_c[] = {6, -7, 8, -9};
-    // int prio_c[] = {56, 38, 98, 27};
+    int val_c[] = {6, -7, 8, -9};
+    int prio_c[] = {56, 38, 98, 27};
 
-    execute(val_p, 5, prio_p);
-
+    int pid = fork();
+    if (pid == 0) {
+        execute(val_c, 4, prio_c);
+    } else {
+        execute(val_p, 4, prio_p);
+        wait(NULL);
+    }
+    
     return 0;
 }
