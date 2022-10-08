@@ -1,13 +1,13 @@
-#include <linux/errno.h>    // Needed for error codes
-#include <linux/init.h>     // Needed for the macros
-#include <linux/kernel.h>   // Needed for KERN_ALERT
-#include <linux/module.h>   // Needed by all modules
-#include <linux/mutex.h>    // Needed for mutex
-#include <linux/proc_fs.h>  // Needed for proc filesystem
-#include <linux/sched.h>    // Needed for current
-#include <linux/slab.h>     // Needed for kmalloc
-#include <linux/string.h>   // Needed for strlen
-#include <linux/uaccess.h>  // Needed for copy_from_user
+#include <linux/errno.h>
+#include <linux/init.h>
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/mutex.h>
+#include <linux/proc_fs.h>
+#include <linux/sched.h>
+#include <linux/slab.h>
+#include <linux/string.h>
+#include <linux/uaccess.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Vanshita Garg and Ashutosh Kumar Singh");
@@ -89,6 +89,7 @@ static struct priority_queue *create_pq(int capacity) {
 
 // Insert an element into the priority queue
 static int insert_pq(struct priority_queue *pq, int val, int priority) {
+    int i;
     if (pq->size == pq->capacity) {
         printk(KERN_ALERT "Error: priority queue is full\n");
         return -EACCES;
@@ -98,7 +99,7 @@ static int insert_pq(struct priority_queue *pq, int val, int priority) {
     pq->heap[pq->size].insert_time = pq->timer;
     pq->timer++;
 
-    int i = pq->size;
+    i = pq->size;
     while (i > 0 && compare(&pq->heap[i], &pq->heap[(i - 1) / 2])) {
         struct element temp = pq->heap[i];
         pq->heap[i] = pq->heap[(i - 1) / 2];
@@ -111,21 +112,22 @@ static int insert_pq(struct priority_queue *pq, int val, int priority) {
 
 // Extract the minimum element from the priority queue
 static int extract_min(struct priority_queue *pq) {
+    int min_val, i, left, right, min_child;
     if (pq->size == 0) {
         printk(KERN_ALERT "Error: priority queue is empty\n");
         return -EACCES;
     }
-    int min_val = pq->heap[0].val;
+    min_val = pq->heap[0].val;
     pq->heap[0] = pq->heap[pq->size - 1];
     pq->size--;
-    int i = 0;
+    i = 0;
     while (i < pq->size) {
-        int left = 2 * i + 1;
-        int right = 2 * i + 2;
+        left = 2 * i + 1;
+        right = 2 * i + 2;
         if (left >= pq->size) {
             break;
         }
-        int min_child = left;
+        min_child = left;
         if (right < pq->size && compare(&pq->heap[right], &pq->heap[left])) {
             min_child = right;
         }
@@ -151,6 +153,7 @@ static void print_pq(struct priority_queue *pq) {
             printk(KERN_INFO "%d  [%d, %d, %d]\n", i, pq->heap[i].val, pq->heap[i].priority, pq->heap[i].insert_time);
         }
     }
+    printk("\n");
 #endif
 }
 
@@ -230,13 +233,17 @@ static void delete_process_list(void) {
 
 // Open handler for proc file
 static int procfile_open(struct inode *inode, struct file *file) {
+    pid_t pid;
+    int ret;
+    struct process_node *curr;
+
     mutex_lock(&mutex);
 
-    pid_t pid = current->pid;
+    pid = current->pid;
     printk(KERN_INFO "procfile_open() invoked by process %d\n", pid);
-    int ret = 0;
+    ret = 0;
 
-    struct process_node *curr = find_process(pid);
+    curr = find_process(pid);
     if (curr == NULL) {
         curr = insert_process(pid);
         if (curr == NULL) {
@@ -256,13 +263,17 @@ static int procfile_open(struct inode *inode, struct file *file) {
 
 // Close handler for proc file
 static int procfile_close(struct inode *inode, struct file *file) {
+    pid_t pid;
+    int ret;
+    struct process_node *curr;
+
     mutex_lock(&mutex);
 
-    pid_t pid = current->pid;
+    pid = current->pid;
     printk(KERN_INFO "procfile_close() invoked by process %d\n", pid);
-    int ret = 0;
+    ret = 0;
 
-    struct process_node *curr = find_process(pid);
+    curr = find_process(pid);
     if (curr == NULL) {
         printk(KERN_ALERT "Error: process %d does not have the proc file open\n", pid);
         ret = -EACCES;
@@ -277,6 +288,7 @@ static int procfile_close(struct inode *inode, struct file *file) {
 
 // Helper function to handle reads
 static ssize_t handle_read(struct process_node *curr) {
+    int min_val;
     if (curr->state == PROC_FILE_OPEN) {
         printk(KERN_ALERT "Error: process %d has not yet written anything to the proc file\n", curr->pid);
         return -EACCES;
@@ -286,7 +298,7 @@ static ssize_t handle_read(struct process_node *curr) {
         printk(KERN_ALERT "Error: priority queue is empty\n");
         return -EACCES;
     }
-    int min_val = extract_min(curr->proc_pq);
+    min_val = extract_min(curr->proc_pq);
     strncpy(procfs_buffer, (const char *)&min_val, sizeof(int));
     procfs_buffer[sizeof(int)] = '\0';
     procfs_buffer_size = sizeof(int);
@@ -295,13 +307,17 @@ static ssize_t handle_read(struct process_node *curr) {
 
 // Read handler for proc file
 static ssize_t procfile_read(struct file *filep, char __user *buffer, size_t length, loff_t *offset) {
+    pid_t pid;
+    int ret;
+    struct process_node *curr;
+    
     mutex_lock(&mutex);
 
-    pid_t pid = current->pid;
+    pid = current->pid;
     printk(KERN_INFO "procfile_read() invoked by process %d\n", pid);
-    int ret = 0;
+    ret = 0;
 
-    struct process_node *curr = find_process(pid);
+    curr = find_process(pid);
     if (curr == NULL) {
         printk(KERN_ALERT "Error: process %d does not have the proc file open\n", pid);
         ret = -EACCES;
@@ -324,12 +340,15 @@ static ssize_t procfile_read(struct file *filep, char __user *buffer, size_t len
 
 // Helper function to handle writes
 static ssize_t handle_write(struct process_node *curr) {
+    size_t capacity;
+    int value, priority, ret;
+
     if (curr->state == PROC_FILE_OPEN) {
         if (procfs_buffer_size > 1ul) {
             printk(KERN_ALERT "Error: Buffer size for capacity must be 1 byte\n");
             return -EINVAL;
         }
-        size_t capacity = (size_t)procfs_buffer[0];
+        capacity = (size_t)procfs_buffer[0];
         if (capacity < 1 || capacity > 100) {
             printk(KERN_ALERT "Error: Capacity must be between 1 and 100\n");
             return -EINVAL;
@@ -350,7 +369,7 @@ static ssize_t handle_write(struct process_node *curr) {
             printk(KERN_ALERT "Error: priority queue is full\n");
             return -EACCES;
         }
-        int value = *((int *)procfs_buffer);
+        value = *((int *)procfs_buffer);
         curr->proc_pq->last_value = value;
         printk(KERN_INFO "Value %d has been written to the proc file for process %d\n", value, curr->pid);
         curr->state = PROC_READ_PRIORITY;
@@ -363,13 +382,13 @@ static ssize_t handle_write(struct process_node *curr) {
             printk(KERN_ALERT "Error: priority queue is full\n");
             return -EACCES;
         }
-        int priority = *((int *)procfs_buffer);
+        priority = *((int *)procfs_buffer);
         if (priority < 1) {
             printk(KERN_ALERT "Error: Priority must be a positive integer\n");
             return -EINVAL;
         }
         printk(KERN_INFO "Priority %d has been written to the proc file for process %d\n", priority, curr->pid);
-        int ret = insert_pq(curr->proc_pq, curr->proc_pq->last_value, priority);
+        ret = insert_pq(curr->proc_pq, curr->proc_pq->last_value, priority);
         if (ret < 0) {
             printk(KERN_ALERT "Error: priority queue insertion failed\n");
             return -EACCES;
@@ -382,13 +401,17 @@ static ssize_t handle_write(struct process_node *curr) {
 
 // Write handler for proc file
 static ssize_t procfile_write(struct file *filep, const char __user *buffer, size_t length, loff_t *offset) {
+    pid_t pid;
+    int ret;
+    struct process_node *curr;
+    
     mutex_lock(&mutex);
 
-    pid_t pid = current->pid;
+    pid = current->pid;
     printk(KERN_INFO "procfile_write() invoked by process %d\n", pid);
-    int ret = 0;
+    ret = 0;
 
-    struct process_node *curr = find_process(pid);
+    curr = find_process(pid);
     if (curr == NULL) {
         printk(KERN_ALERT "Error: process %d does not have the proc file open\n", pid);
         ret = -EACCES;
