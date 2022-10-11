@@ -14,8 +14,6 @@ MODULE_AUTHOR("Vanshita Garg and Ashutosh Kumar Singh");
 MODULE_DESCRIPTION("LKM for a priority queue");
 MODULE_VERSION("0.1");
 
-// #define DEBUG
-
 #define PROCFS_NAME "partb_1_3"
 #define PROCFS_MAX_SIZE 1024
 
