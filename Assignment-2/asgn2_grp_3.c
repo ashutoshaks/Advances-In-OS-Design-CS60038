@@ -1,3 +1,8 @@
+/*
+    Ashutosh Kumar Singh - 19CS30008
+    Vanshita Garg - 19CS10064
+*/
+
 #include <linux/errno.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -13,6 +18,8 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Vanshita Garg and Ashutosh Kumar Singh");
 MODULE_DESCRIPTION("LKM for a priority queue");
 MODULE_VERSION("0.1");
+
+#define DEBUG
 
 #define PROCFS_NAME "cs60038_a2_grp3"
 
@@ -270,7 +277,7 @@ static void delete_process_list(void) {
     }
 }
 
-// Open, close, read and write handlers for proc file
+// Open, close handlers for proc file
 
 // Open handler for proc file
 static int procfile_open(struct inode *inode, struct file *file) {
