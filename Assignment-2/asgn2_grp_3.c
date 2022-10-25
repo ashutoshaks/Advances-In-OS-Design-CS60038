@@ -14,8 +14,14 @@ MODULE_AUTHOR("Vanshita Garg and Ashutosh Kumar Singh");
 MODULE_DESCRIPTION("LKM for a priority queue");
 MODULE_VERSION("0.1");
 
-#define PROCFS_NAME "partb_1_3"
-#define PROCFS_MAX_SIZE 1024
+#define PROCFS_NAME "cs60038_a2_grp3"
+
+#define PB2_SET_CAPACITY _IOW(0x10, 0x31, int32_t *)
+#define PB2_INSERT_INT _IOW(0x10, 0x32, int32_t *)
+#define PB2_INSERT_PRIO _IOW(0x10, 0x33, int32_t *)
+#define PB2_GET_INFO _IOW(0x10, 0x34, int32_t *)
+#define PB2_GET_MIN _IOW(0x10, 0x35, int32_t *)
+#define PB2_GET_MAX _IOW(0x10, 0x36, int32_t *)
 
 struct element {
     int val;
@@ -58,11 +64,14 @@ struct process_node {
 
 // Global variables
 static struct proc_dir_entry *proc_file;
-static char procfs_buffer[PROCFS_MAX_SIZE];
-static size_t procfs_buffer_size = 0;
 static struct process_node *process_list = NULL;
 
 DEFINE_MUTEX(mutex);
+
+struct obj_info {
+    int32_t prio_que_size;  // current number of elements in priority queue
+    int32_t capacity;       // maximum capacity of priority queue
+};
 
 // Priority queue functions
 
@@ -85,40 +94,17 @@ static struct priority_queue *create_pq(int capacity) {
     return pq;
 }
 
-// Insert an element into the priority queue
-static int insert_pq(struct priority_queue *pq, int val, int priority) {
-    int i;
-    if (pq->size == pq->capacity) {
-        printk(KERN_ALERT "Error: priority queue is full\n");
-        return -EACCES;
-    }
-    pq->heap[pq->size].val = val;
-    pq->heap[pq->size].priority = priority;
-    pq->heap[pq->size].insert_time = pq->timer;
-    pq->timer++;
-
-    i = pq->size;
+static void shift_up(struct priority_queue *pq, int i) {
     while (i > 0 && compare(&pq->heap[i], &pq->heap[(i - 1) / 2])) {
         struct element temp = pq->heap[i];
         pq->heap[i] = pq->heap[(i - 1) / 2];
         pq->heap[(i - 1) / 2] = temp;
         i = (i - 1) / 2;
     }
-    pq->size++;
-    return 0;
 }
 
-// Extract the minimum element from the priority queue
-static int extract_min(struct priority_queue *pq) {
-    int min_val, i, left, right, min_child;
-    if (pq->size == 0) {
-        printk(KERN_ALERT "Error: priority queue is empty\n");
-        return -EACCES;
-    }
-    min_val = pq->heap[0].val;
-    pq->heap[0] = pq->heap[pq->size - 1];
-    pq->size--;
-    i = 0;
+static void shift_down(struct priority_queue *pq, int i) {
+    int left, right, min_child;
     while (i < pq->size) {
         left = 2 * i + 1;
         right = 2 * i + 2;
@@ -138,7 +124,64 @@ static int extract_min(struct priority_queue *pq) {
             break;
         }
     }
-    return min_val;
+}
+
+// Insert an element into the priority queue
+static int insert(struct priority_queue *pq, int val, int priority) {
+    if (pq->size == pq->capacity) {
+        printk(KERN_ALERT "Error: priority queue is full\n");
+        return -EACCES;
+    }
+    pq->heap[pq->size].val = val;
+    pq->heap[pq->size].priority = priority;
+    pq->heap[pq->size].insert_time = pq->timer;
+    pq->timer++;
+
+    shift_up(pq, pq->size);
+    pq->size++;
+    return 0;
+}
+
+// Extract the minimum element from the priority queue
+static int extract_min(struct priority_queue *pq, struct element *min_elem) {
+    if (pq->size == 0) {
+        printk(KERN_ALERT "Error: priority queue is empty\n");
+        return -EACCES;
+    }
+    min_elem->val = pq->heap[0].val;
+    min_elem->priority = pq->heap[0].priority;
+    min_elem->insert_time = pq->heap[0].insert_time;
+
+    pq->heap[0] = pq->heap[pq->size - 1];
+    pq->size--;
+    shift_down(pq, 0);
+    return 0;
+}
+
+static int extract_max(struct priority_queue *pq, struct element *max_elem) {
+    struct element max_el, temp;
+    int max_ind, i;
+
+    if (pq->size == 0) {
+        printk(KERN_ALERT "Error: priority queue is empty\n");
+        return -EACCES;
+    }
+    max_ind = 0;
+    max_el = pq->heap[0];
+    for (i = 1; i < pq->size; i++) {
+        if (compare(&max_el, &pq->heap[i])) {
+            max_el = pq->heap[i];
+            max_ind = i;
+        }
+    }
+    max_elem->val = max_el.val;
+    max_elem->priority = max_el.priority;
+    max_elem->insert_time = max_el.insert_time;
+
+    pq->heap[max_ind].priority = -1;
+    shift_up(pq, max_ind);
+    extract_min(pq, &temp);
+    return 0;
 }
 
 // Print priority queue
@@ -284,9 +327,100 @@ static int procfile_close(struct inode *inode, struct file *file) {
     return ret;
 }
 
-// Helper function to handle reads
-static ssize_t handle_read(struct process_node *curr) {
+static long pb2_set_capacity(unsigned long arg, struct process_node *curr) {
+    int32_t capacity;
+
+    printk(KERN_INFO "PB2_SET_CAPACITY invoked by process %d\n", curr->pid);
+    if (copy_from_user(&capacity, (int32_t *)arg, sizeof(int32_t)) != 0) {
+        printk(KERN_ALERT "Error: could not copy capacity from user\n");
+        return -EINVAL;
+    }
+    if (curr->state != PROC_FILE_OPEN) {
+        delete_pq(curr->proc_pq);
+    }
+    if (capacity < 1 || capacity > 100) {
+        printk(KERN_ALERT "Error: Capacity must be between 1 and 100\n");
+        return -EINVAL;
+    }
+    curr->proc_pq = create_pq(capacity);
+    if (curr->proc_pq == NULL) {
+        printk(KERN_ALERT "Error: priority queue initialization failed\n");
+        return -ENOMEM;
+    }
+    printk(KERN_INFO "Priority queue with capacity %d has been intialized for process %d\n", capacity, curr->pid);
+    curr->state = PROC_READ_VALUE;
+    return 0;
+}
+
+static long pb2_insert_int(unsigned long arg, struct process_node *curr) {
+    int32_t value;
+
+    printk(KERN_INFO "PB2_INSERT_INT invoked by process %d\n", curr->pid);
+    if (copy_from_user(&value, (int32_t *)arg, sizeof(int32_t)) != 0) {
+        printk(KERN_ALERT "Error: could not copy value from user\n");
+        return -EINVAL;
+    }
+    if (curr->state == PROC_READ_VALUE) {
+        curr->proc_pq->last_value = value;
+        printk(KERN_INFO "Value %d has been written to the proc file for process %d\n", value, curr->pid);
+        curr->state = PROC_READ_PRIORITY;
+    } else if (curr->state == PROC_FILE_OPEN) {
+        printk(KERN_ALERT "Error: process %d has not set the capacity of the priority queue\n", curr->pid);
+        return -EACCES;
+    } else if (curr->state == PROC_READ_PRIORITY) {
+        printk(KERN_ALERT "Error: process %d is supposed to enter a value, not priority\n", curr->pid);
+        return -EACCES;
+    }
+    return 0;
+}
+
+static long pb2_insert_prio(unsigned long arg, struct process_node *curr) {
+    int32_t prio;
+
+    printk(KERN_INFO "PB2_INSERT_PRIO invoked by process %d\n", curr->pid);
+    if (copy_from_user(&prio, (int32_t *)arg, sizeof(int32_t)) != 0) {
+        printk(KERN_ALERT "Error: could not copy priority from user\n");
+        return -EINVAL;
+    }
+    if (curr->state == PROC_READ_PRIORITY) {
+        if (curr->proc_pq->size == curr->proc_pq->capacity) {
+            printk(KERN_ALERT "Error: priority queue is full\n");
+            return -EACCES;
+        }
+        if (prio < 1) {
+            printk(KERN_ALERT "Error: Priority must be a positive integer\n");
+            return -EINVAL;
+        }
+        printk(KERN_INFO "Priority %d has been written to the proc file for process %d\n", prio, curr->pid);
+        insert(curr->proc_pq, curr->proc_pq->last_value, prio);
+        printk(KERN_INFO "(%d, %d) value-priority element has been inserted into the priority queue for process %d\n", curr->proc_pq->last_value, prio, curr->pid);
+        curr->state = PROC_READ_VALUE;
+    } else if (curr->state == PROC_FILE_OPEN) {
+        printk(KERN_ALERT "Error: process %d has not set the capacity of the priority queue\n", curr->pid);
+        return -EACCES;
+    } else if (curr->state == PROC_READ_PRIORITY) {
+        printk(KERN_ALERT "Error: process %d is supposed to enter priority, not value\n", curr->pid);
+        return -EACCES;
+    }
+    return 0;
+}
+
+static long pb2_get_info(unsigned long arg, struct process_node *curr) {
+    struct obj_info info;
+    printk(KERN_INFO "PB2_GET_INFO invoked by process %d\n", curr->pid);
+    info.prio_que_size = curr->proc_pq->size;
+    info.capacity = curr->proc_pq->capacity;
+    if (copy_to_user((struct obj_info *)arg, &info, sizeof(struct obj_info))) {
+        printk(KERN_ALERT "Error: could not copy info to user\n");
+        return -EINVAL;
+    }
+    return 0;
+}
+
+static long pb2_get_min(unsigned long arg, struct process_node *curr) {
     int min_val;
+    struct element min_elem;
+    printk(KERN_INFO "PB2_GET_MIN invoked by process %d\n", curr->pid);
     if (curr->state == PROC_FILE_OPEN) {
         printk(KERN_ALERT "Error: process %d has not yet written anything to the proc file\n", curr->pid);
         return -EACCES;
@@ -296,148 +430,78 @@ static ssize_t handle_read(struct process_node *curr) {
         printk(KERN_ALERT "Error: priority queue is empty\n");
         return -EACCES;
     }
-    min_val = extract_min(curr->proc_pq);
-    strncpy(procfs_buffer, (const char *)&min_val, sizeof(int));
-    procfs_buffer[sizeof(int)] = '\0';
-    procfs_buffer_size = sizeof(int);
-    return procfs_buffer_size;
-}
-
-// Read handler for proc file
-static ssize_t procfile_read(struct file *filep, char __user *buffer, size_t length, loff_t *offset) {
-    pid_t pid;
-    int ret;
-    struct process_node *curr;
-    
-    mutex_lock(&mutex);
-
-    pid = current->pid;
-    printk(KERN_INFO "procfile_read() invoked by process %d\n", pid);
-    ret = 0;
-
-    curr = find_process(pid);
-    if (curr == NULL) {
-        printk(KERN_ALERT "Error: process %d does not have the proc file open\n", pid);
-        ret = -EACCES;
-    } else {
-        procfs_buffer_size = min(length, (size_t)PROCFS_MAX_SIZE);
-        ret = handle_read(curr);
-        if (ret >= 0) {
-            if (copy_to_user(buffer, procfs_buffer, procfs_buffer_size) != 0) {
-                printk(KERN_ALERT "Error: could not copy data to user space\n");
-                ret = -EACCES;
-            } else {
-                ret = procfs_buffer_size;
-            }
-        }
-        print_pq(curr->proc_pq);
+    extract_min(curr->proc_pq, &min_elem);
+    min_val = min_elem.val;
+    if (copy_to_user((int32_t *)arg, &min_val, sizeof(int32_t))) {
+        printk(KERN_ALERT "Error: could not copy min value to user\n");
+        return -EINVAL;
     }
-    mutex_unlock(&mutex);
-    return ret;
+    return 0;
 }
 
-// Helper function to handle writes
-static ssize_t handle_write(struct process_node *curr) {
-    size_t capacity;
-    int value, priority, ret;
-
+static long pb2_get_max(unsigned long arg, struct process_node *curr) {
+    int max_val;
+    struct element max_elem;
+    printk(KERN_INFO "PB2_GET_MAX invoked by process %d\n", curr->pid);
     if (curr->state == PROC_FILE_OPEN) {
-        if (procfs_buffer_size > 1ul) {
-            printk(KERN_ALERT "Error: Buffer size for capacity must be 1 byte\n");
-            return -EINVAL;
-        }
-        capacity = (size_t)procfs_buffer[0];
-        if (capacity < 1 || capacity > 100) {
-            printk(KERN_ALERT "Error: Capacity must be between 1 and 100\n");
-            return -EINVAL;
-        }
-        curr->proc_pq = create_pq(capacity);
-        if (curr->proc_pq == NULL) {
-            printk(KERN_ALERT "Error: priority queue initialization failed\n");
-            return -ENOMEM;
-        }
-        printk(KERN_INFO "Priority queue with capacity %zu has been intialized for process %d\n", capacity, curr->pid);
-        curr->state = PROC_READ_VALUE;
-    } else if (curr->state == PROC_READ_VALUE) {
-        if (procfs_buffer_size > 4ul) {  // sizeof(int)
-            printk(KERN_ALERT "Error: Buffer size for value must be 4 bytes\n");
-            return -EINVAL;
-        }
-        if (curr->proc_pq->size == curr->proc_pq->capacity) {
-            printk(KERN_ALERT "Error: priority queue is full\n");
-            return -EACCES;
-        }
-        value = *((int *)procfs_buffer);
-        curr->proc_pq->last_value = value;
-        printk(KERN_INFO "Value %d has been written to the proc file for process %d\n", value, curr->pid);
-        curr->state = PROC_READ_PRIORITY;
-    } else if (curr->state == PROC_READ_PRIORITY) {
-        if (procfs_buffer_size > 4ul) {  // sizeof(int)
-            printk(KERN_ALERT "Error: Buffer size for priority must be 4 bytes\n");
-            return -EINVAL;
-        }
-        if (curr->proc_pq->size == curr->proc_pq->capacity) {
-            printk(KERN_ALERT "Error: priority queue is full\n");
-            return -EACCES;
-        }
-        priority = *((int *)procfs_buffer);
-        if (priority < 1) {
-            printk(KERN_ALERT "Error: Priority must be a positive integer\n");
-            return -EINVAL;
-        }
-        printk(KERN_INFO "Priority %d has been written to the proc file for process %d\n", priority, curr->pid);
-        ret = insert_pq(curr->proc_pq, curr->proc_pq->last_value, priority);
-        if (ret < 0) {
-            printk(KERN_ALERT "Error: priority queue insertion failed\n");
-            return -EACCES;
-        }
-        printk(KERN_INFO "(%d, %d) value-priority element has been inserted into the priority queue for process %d\n", curr->proc_pq->last_value, priority, curr->pid);
-        curr->state = PROC_READ_VALUE;
+        printk(KERN_ALERT "Error: process %d has not yet written anything to the proc file\n", curr->pid);
+        return -EACCES;
     }
-    return procfs_buffer_size;
+    // curr->proc_pq cannot be NULL if the control comes here
+    if (curr->proc_pq->size == 0) {
+        printk(KERN_ALERT "Error: priority queue is empty\n");
+        return -EACCES;
+    }
+    extract_max(curr->proc_pq, &max_elem);
+    max_val = max_elem.val;
+    if (copy_to_user((int32_t *)arg, &max_val, sizeof(int32_t))) {
+        printk(KERN_ALERT "Error: could not copy max value to user\n");
+        return -EINVAL;
+    }
+    return 0;
 }
 
-// Write handler for proc file
-static ssize_t procfile_write(struct file *filep, const char __user *buffer, size_t length, loff_t *offset) {
-    pid_t pid;
+static long proc_ioctl(struct file *filep, unsigned int cmd, unsigned long arg) {
     int ret;
+    pid_t pid;
     struct process_node *curr;
-    
+
     mutex_lock(&mutex);
 
     pid = current->pid;
-    printk(KERN_INFO "procfile_write() invoked by process %d\n", pid);
-    ret = 0;
-
     curr = find_process(pid);
     if (curr == NULL) {
         printk(KERN_ALERT "Error: process %d does not have the proc file open\n", pid);
-        ret = -EACCES;
-    } else {
-        if (buffer == NULL || length == 0) {
-            printk(KERN_ALERT "Error: empty write\n");
-            ret = -EINVAL;
-        } else {
-            procfs_buffer_size = min(length, (size_t)PROCFS_MAX_SIZE);
-            if (copy_from_user(procfs_buffer, buffer, procfs_buffer_size)) {
-                printk(KERN_ALERT "Error: could not copy from user\n");
-                ret = -EFAULT;
-            } else {
-                ret = handle_write(curr);
-            }
-        }
-        print_pq(curr->proc_pq);
+        mutex_unlock(&mutex);
+        return -EACCES;
     }
+
+    if (cmd == PB2_SET_CAPACITY) {
+        ret = pb2_set_capacity(arg, curr);
+    } else if (cmd == PB2_INSERT_INT) {
+        ret = pb2_insert_int(arg, curr);
+    } else if (cmd == PB2_INSERT_PRIO) {
+        ret = pb2_insert_prio(arg, curr);
+    } else if (cmd == PB2_GET_INFO) {
+        ret = pb2_get_info(arg, curr);
+    } else if (cmd == PB2_GET_MIN) {
+        ret = pb2_get_min(arg, curr);
+    } else if (cmd == PB2_GET_MAX) {
+        ret = pb2_get_max(arg, curr);
+    } else {
+        printk(KERN_ALERT "Error: invalid ioctl command\n");
+        ret = -EINVAL;
+    }
+
+    print_pq(curr->proc_pq);
     mutex_unlock(&mutex);
     return ret;
 }
 
 static const struct proc_ops proc_fops = {
     .proc_open = procfile_open,
-    .proc_read = procfile_read,
-    .proc_write = procfile_write,
     .proc_release = procfile_close,
-};
+    .proc_ioctl = proc_ioctl};
 
 // Module initialization
 static int __init lkm_init(void) {

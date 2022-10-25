@@ -1,4 +1,4 @@
-obj-m+=1b.o
+obj-m+=partb_1_3.o
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
 clean:
