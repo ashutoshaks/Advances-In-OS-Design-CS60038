@@ -19,8 +19,6 @@ MODULE_AUTHOR("Vanshita Garg and Ashutosh Kumar Singh");
 MODULE_DESCRIPTION("LKM for a priority queue");
 MODULE_VERSION("0.1");
 
-#define DEBUG
-
 #define PROCFS_NAME "cs60038_a2_grp3"
 
 #define PB2_SET_CAPACITY _IOW(0x10, 0x31, int32_t *)
@@ -344,6 +342,7 @@ static long pb2_set_capacity(unsigned long arg, struct process_node *curr) {
     }
     if (curr->state != PROC_FILE_OPEN) {
         delete_pq(curr->proc_pq);
+        printk(KERN_INFO "Resetting priority queue for process %d\n", curr->pid);
     }
     if (capacity < 1 || capacity > 100) {
         printk(KERN_ALERT "Error: Capacity must be between 1 and 100\n");
@@ -405,7 +404,7 @@ static long pb2_insert_prio(unsigned long arg, struct process_node *curr) {
     } else if (curr->state == PROC_FILE_OPEN) {
         printk(KERN_ALERT "Error: process %d has not set the capacity of the priority queue\n", curr->pid);
         return -EACCES;
-    } else if (curr->state == PROC_READ_PRIORITY) {
+    } else if (curr->state == PROC_READ_VALUE) {
         printk(KERN_ALERT "Error: process %d is supposed to enter priority, not value\n", curr->pid);
         return -EACCES;
     }
@@ -415,6 +414,10 @@ static long pb2_insert_prio(unsigned long arg, struct process_node *curr) {
 static long pb2_get_info(unsigned long arg, struct process_node *curr) {
     struct obj_info info;
     printk(KERN_INFO "PB2_GET_INFO invoked by process %d\n", curr->pid);
+    if (curr->state == PROC_FILE_OPEN) {
+        printk(KERN_ALERT "Error: process %d has not set the capacity of the priority queue\n", curr->pid);
+        return -EACCES;
+    }
     info.prio_que_size = curr->proc_pq->size;
     info.capacity = curr->proc_pq->capacity;
     if (copy_to_user((struct obj_info *)arg, &info, sizeof(struct obj_info))) {
@@ -512,7 +515,7 @@ static const struct proc_ops proc_fops = {
 
 // Module initialization
 static int __init lkm_init(void) {
-    printk(KERN_INFO "LKM for partb_1_3 loaded\n");
+    printk(KERN_INFO "LKM for cs60038_a2_grp3 loaded\n");
 
     proc_file = proc_create(PROCFS_NAME, 0666, NULL, &proc_fops);
     if (proc_file == NULL) {
@@ -528,7 +531,7 @@ static void __exit lkm_exit(void) {
     delete_process_list();
     remove_proc_entry(PROCFS_NAME, NULL);
     printk(KERN_INFO "/proc/%s removed\n", PROCFS_NAME);
-    printk(KERN_INFO "LKM for partb_1_3 unloaded\n");
+    printk(KERN_INFO "LKM for cs60038_a2_grp3 unloaded\n");
 }
 
 module_init(lkm_init);
