@@ -511,7 +511,8 @@ static long proc_ioctl(struct file *filep, unsigned int cmd, unsigned long arg) 
 static const struct proc_ops proc_fops = {
     .proc_open = procfile_open,
     .proc_release = procfile_close,
-    .proc_ioctl = proc_ioctl};
+    .proc_ioctl = proc_ioctl
+};
 
 // Module initialization
 static int __init lkm_init(void) {
